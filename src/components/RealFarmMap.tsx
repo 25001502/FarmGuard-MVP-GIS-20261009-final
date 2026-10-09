@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from 'maplibre-gl'
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
@@ -18,8 +19,38 @@ const MAP_STYLE: maplibregl.StyleSpecification = {
       attribution: '© OpenStreetMap contributors',
       maxzoom: 19,
     },
+    satellite: {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      attribution: 'Imagery © Esri, Maxar, Earthstar Geographics and the GIS User Community',
+      maxzoom: 17,
+    },
   },
-  layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+  layers: [
+    { id: 'osm', type: 'raster', source: 'osm', layout: { visibility: 'none' } },
+    { id: 'satellite', type: 'raster', source: 'satellite', layout: { visibility: 'visible' } },
+  ],
+}
+
+function toggleStyle(active: boolean): CSSProperties {
+  const style: CSSProperties = {
+    paddingTop: 7,
+    paddingBottom: 7,
+    paddingLeft: 12,
+    paddingRight: 12,
+    borderWidth: 0,
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    backgroundColor: '#ffffff',
+    color: '#174a35',
+  }
+  if (active) {
+    style.backgroundColor = '#174a35'
+    style.color = '#ffffff'
+  }
+  return style
 }
 
 function localToGeo(point: Point): [number, number] {
@@ -48,6 +79,7 @@ export function RealFarmMap({ state, onSelect, editable = false, draftVertices, 
   const mapRef = useRef<MapLibreMap | null>(null)
   const mapReadyRef = useRef(false)
   const [mapReady, setMapReady] = useState(false)
+  const [mapStyle, setMapStyle] = useState<'satellite' | 'streets'>('satellite')
   const vertexMarkersRef = useRef<Marker[]>([])
   const animalMarkersRef = useRef<Map<string, Marker>>(new Map())
   const selectRef = useRef(onSelect)
@@ -90,6 +122,22 @@ export function RealFarmMap({ state, onSelect, editable = false, draftVertices, 
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
+    let satelliteVisibility: 'visible' | 'none' = 'none'
+    let streetVisibility: 'visible' | 'none' = 'visible'
+    let fenceColor = '#174a35'
+    if (mapStyle === 'satellite') {
+      satelliteVisibility = 'visible'
+      streetVisibility = 'none'
+      fenceColor = '#ffffff'
+    }
+    map.setLayoutProperty('satellite', 'visibility', satelliteVisibility)
+    map.setLayoutProperty('osm', 'visibility', streetVisibility)
+    map.setPaintProperty('farmguard-geofence-line', 'line-color', fenceColor)
+  }, [mapStyle, mapReady])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
     vertexMarkersRef.current.forEach((marker) => marker.remove())
     vertexMarkersRef.current = []
     if (!editable) return
@@ -127,5 +175,8 @@ export function RealFarmMap({ state, onSelect, editable = false, draftVertices, 
     })
   }, [mapReady, state.animals, state.security, state.selectedAnimalId])
 
-  return <div className="map-wrap gis-map-wrap"><div ref={containerRef} className="gis-map-canvas" role="img" aria-label="Interactive OpenStreetMap view of the Makonde Farm demo region with simulated cattle and editable safe zone" /><div className="gis-map-badge"><Icon name="map" size={15} /> OpenStreetMap · GIS prototype</div><div className="gis-map-legend"><span><i className="legend-fence" /> Safe zone</span><span><i className="legend-safe" /> Inside</span><span><i className="legend-warning" /> Near edge</span><span><i className="legend-danger" /> Alert</span></div><div className="gis-map-caption">Demo coordinates · no live GPS</div></div>
+  let sourceLabel = 'OpenStreetMap'
+  if (mapStyle === 'satellite') sourceLabel = 'Esri satellite imagery'
+
+  return <div className="map-wrap gis-map-wrap"><div ref={containerRef} className="gis-map-canvas" role="img" aria-label={'Interactive ' + sourceLabel + ' view of the Makonde Farm demo region with simulated cattle and editable safe zone'} /><div style={{ position: 'absolute', top: 12, right: 56, zIndex: 5, display: 'flex', borderRadius: 8, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><button type="button" style={toggleStyle(mapStyle === 'satellite')} onClick={() => setMapStyle('satellite')}>Satellite</button><button type="button" style={toggleStyle(mapStyle === 'streets')} onClick={() => setMapStyle('streets')}>Map</button></div><div className="gis-map-badge"><Icon name="map" size={15} /> {sourceLabel} · GIS prototype</div><div className="gis-map-legend"><span><i className="legend-fence" /> Safe zone</span><span><i className="legend-safe" /> Inside</span><span><i className="legend-warning" /> Near edge</span><span><i className="legend-danger" /> Alert</span></div><div className="gis-map-caption">Demo coordinates · no live GPS</div></div>
 }
