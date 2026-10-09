@@ -1,0 +1,64 @@
+.gis-animal-marker {
+  width: 42px;
+  height: 42px;
+  color: #2c8b5a;
+  position: absolute;
+}
+
+.gis-animal-marker.warning { color: #b87720; }
+.gis-animal-marker.danger { color: #bf554a; }
+
+.gis-animal-glyph {
+  width: 25px;
+  height: 25px;
+  border: 2.5px solid currentColor;
+}
+
+.gis-animal-glyph::before,
+.gis-animal-glyph::after { content: none; }
+
+.gis-animal-glyph svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gis-animal-marker.selected::before {
+  width: 37px;
+  height: 37px;
+}
+
+.gis-animal-marker b { bottom: 31px; }
+
+.grazing-edit-copy {
+  flex: 1;
+  min-width: 210px;
+}
+
+.grazing-edit-copy strong,
+.grazing-edit-copy span { display: block; }
+
+.grazing-edit-copy span {
+  color: #956f37;
+  font-size: 10px;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.grazing-area-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.grazing-area-controls .button { background: rgba(255, 255, 255, .72); }
+.grazing-shift-label { color: #9a7740; font-size: 10px; font-weight: 800; margin-left: 3px; }
+
+@media (max-width: 700px) {
+  .grazing-area-controls { width: 100%; }
+}
