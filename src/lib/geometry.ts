@@ -43,6 +43,53 @@ export function classifyBoundary(point: Point, vertices: Point[], warningDistanc
   return pointInPolygon(point, vertices) ? 'INSIDE' : 'OUTSIDE'
 }
 
+/** Finds a comfortably internal point for a simulated return-to-zone route. */
+export function findSafePoint(vertices: Point[], warningDistance: number, variant = 0): Point | null {
+  if (vertices.length < 3) return null
+  const xs = vertices.map((point) => point.x)
+  const ys = vertices.map((point) => point.y)
+  const minX = Math.min(...xs); const maxX = Math.max(...xs)
+  const minY = Math.min(...ys); const maxY = Math.max(...ys)
+  const candidates: Point[] = []
+  for (let row = 2; row <= 8; row += 1) {
+    for (let column = 2; column <= 8; column += 1) {
+      const point = { x: minX + ((maxX - minX) * column) / 10, y: minY + ((maxY - minY) * row) / 10 }
+      if (classifyBoundary(point, vertices, warningDistance) === 'INSIDE') candidates.push(point)
+    }
+  }
+  return candidates.length ? candidates[variant % candidates.length] : null
+}
+
+export function findNearBoundaryPoint(vertices: Point[], warningDistance: number, variant = 0): Point | null {
+  const safePoint = findSafePoint(vertices, warningDistance, variant)
+  if (!safePoint) return null
+  for (let offset = 0; offset < vertices.length; offset += 1) {
+    const index = (variant + offset) % vertices.length
+    const edgeEnd = vertices[(index + 1) % vertices.length]
+    const edgeMidpoint = { x: (vertices[index].x + edgeEnd.x) / 2, y: (vertices[index].y + edgeEnd.y) / 2 }
+    for (let step = 1; step <= 10; step += 1) {
+      const fraction = step / 20
+      const point = { x: edgeMidpoint.x + (safePoint.x - edgeMidpoint.x) * fraction, y: edgeMidpoint.y + (safePoint.y - edgeMidpoint.y) * fraction }
+      if (classifyBoundary(point, vertices, warningDistance) === 'NEAR_BOUNDARY') return point
+    }
+  }
+  return null
+}
+
+export function findOutsidePoint(vertices: Point[], warningDistance: number, variant = 0): Point | null {
+  const safePoint = findSafePoint(vertices, warningDistance, variant)
+  if (!safePoint) return null
+  for (let offset = 0; offset < vertices.length; offset += 1) {
+    const vertex = vertices[(variant + offset) % vertices.length]
+    for (let step = 12; step <= 30; step += 1) {
+      const scale = step / 10
+      const point = { x: safePoint.x + (vertex.x - safePoint.x) * scale, y: safePoint.y + (vertex.y - safePoint.y) * scale }
+      if (classifyBoundary(point, vertices, warningDistance) === 'OUTSIDE') return point
+    }
+  }
+  return null
+}
+
 export function polygonArea(vertices: Point[]): number {
   if (vertices.length < 3) return 0
   return Math.abs(vertices.reduce((sum, vertex, index) => {
