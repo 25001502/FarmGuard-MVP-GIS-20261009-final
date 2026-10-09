@@ -10,7 +10,7 @@ export const DEFAULT_GEOFENCE: Geofence = {
     { x: 805, y: 188 }, { x: 780, y: 425 }, { x: 580, y: 508 },
     { x: 275, y: 482 }, { x: 124, y: 325 },
   ],
-  warningDistance: 25,
+  warningDistance: 50,
   version: 1,
   updatedAt: new Date().toISOString(),
 }
@@ -21,13 +21,13 @@ const seed = [
   ['C-005', 'Busi', 610, 285, 76, 'East meadow'], ['C-006', 'Nala', 385, 412, 94, 'Central pasture'],
   ['C-007', 'Thabo', 674, 372, 87, 'Boundary track'], ['C-008', 'Tumi', 504, 363, 99, 'Central pasture'],
   ['C-009', 'Sisi', 255, 344, 81, 'West meadow'], ['C-010', 'Mpho', 600, 405, 90, 'South pasture'],
-  ['C-011', 'Rara', 475, 465, 84, 'South pasture'], ['C-012', 'Kamo', 692, 239, 98, 'East meadow'],
+  ['C-011', 'Rara', 475, 430, 84, 'South pasture'], ['C-012', 'Kamo', 692, 239, 98, 'East meadow'],
 ] as const
 
 export function createSeedAnimals(now = new Date().toISOString()): Animal[] {
   return seed.map(([id, name, x, y, batteryPercent, grazingArea]) => ({
     id, name, collarId: `TAG-${id.slice(2)}`, grazingArea, batteryPercent,
-    lastSeenAt: now, position: { x, y }, source: 'simulated',
+    lastSeenAt: now, position: { x, y }, source: 'simulated', speeds: [],
   }))
 }
 
@@ -44,6 +44,7 @@ export function createInitialState(seedNow = new Date().toISOString()): FarmStat
     }])),
     alerts: [], selectedAnimalId: 'C-007', soundEnabled: true, fenceVisible: true,
     demoStage: 0, demoRunning: false, lastTelemetryAt: now,
+    liveMode: false, simTick: 0, sms: [], smsEnabled: true,
   }
 }
 

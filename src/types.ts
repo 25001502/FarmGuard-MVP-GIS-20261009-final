@@ -1,7 +1,7 @@
 export type Point = { x: number; y: number }
 export type BoundaryState = 'INSIDE' | 'NEAR_BOUNDARY' | 'OUTSIDE' | 'UNKNOWN'
 export type DeviceState = 'ONLINE' | 'STALE' | 'OFFLINE'
-export type AlertType = 'PROXIMITY' | 'BREACH' | 'TAMPER' | 'SIGNAL_LOST' | 'LOW_BATTERY'
+export type AlertType = 'PROXIMITY' | 'BREACH' | 'TAMPER' | 'SIGNAL_LOST' | 'LOW_BATTERY' | 'UNUSUAL_MOVEMENT'
 export type AlertStatus = 'open' | 'acknowledged' | 'resolved'
 export type Severity = 'info' | 'warning' | 'critical'
 export type View = 'overview' | 'map' | 'livestock' | 'alerts' | 'settings'
@@ -15,6 +15,7 @@ export type Animal = {
   lastSeenAt: string
   position: Point
   source: 'simulated' | 'device'
+  speeds: number[]
 }
 
 export type Geofence = {
@@ -62,6 +63,8 @@ export type SecurityAlert = {
   source: 'simulated' | 'device'
 }
 
+export type SmsMessage = { id: string; alertId: string; to: string; text: string; createdAt: string }
+
 export type DemoStage = 0 | 1 | 2 | 3
 export type FarmState = {
   version: 1
@@ -75,4 +78,8 @@ export type FarmState = {
   demoStage: DemoStage
   demoRunning: boolean
   lastTelemetryAt: string
+  liveMode: boolean
+  simTick: number
+  sms: SmsMessage[]
+  smsEnabled: boolean
 }

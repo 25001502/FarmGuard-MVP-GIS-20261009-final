@@ -62,3 +62,17 @@
 @media (max-width: 700px) {
   .grazing-area-controls { width: 100%; }
 }
+
+.sms-card { margin-top: 18px; padding-bottom: 18px; }
+.sms-card .hint, .sms-card .sms-row, .sms-card .sms-input, .sms-card .sms-reply { margin-left: 19px; margin-right: 19px; }
+.sms-card .hint { color: #8f9c8d; font-size: 11px; }
+.sms-row { display: flex; gap: 10px; padding-top: 8px; padding-bottom: 8px; border-top: 1px solid #eff1eb; font-size: 11px; color: #425b49; }
+.sms-row small { color: #97a59a; flex: none; }
+.sms-input { display: flex; gap: 8px; margin-top: 12px; }
+.sms-input input { flex: 1; min-width: 0; border: 1px solid #dee7d7; border-radius: 9px; padding: 9px 12px; font-size: 12px; }
+.sms-reply { background: #eef5e8; border-radius: 9px; padding: 10px 12px; font-size: 11px; color: #4f7959; line-height: 1.5; margin-top: 10px; }
+
+.split-grid .large .gis-map-canvas { height: calc(100vh - 320px); min-height: 450px; }
+@media (max-width: 700px) {
+  .split-grid .large .gis-map-canvas { height: 330px; min-height: 0; }
+}

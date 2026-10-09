@@ -28,7 +28,7 @@ describe('security engine', () => {
 
   it('reclassifies every animal immediately when the grazing boundary changes', () => {
     const state = createInitialState('2026-10-09T08:00:00.000Z')
-    const smallerFence = { ...state.geofence, vertices: [{ x: 390, y: 180 }, { x: 500, y: 180 }, { x: 500, y: 270 }, { x: 390, y: 270 }] }
+    const smallerFence = { ...state.geofence, warningDistance: 25, vertices: [{ x: 390, y: 180 }, { x: 500, y: 180 }, { x: 500, y: 270 }, { x: 390, y: 270 }] }
     const security = reclassifyForGeofence(state.animals, state.security, smallerFence, '2026-10-09T09:00:00.000Z')
     expect(security['C-003'].boundary).toBe('INSIDE')
     expect(security['C-001'].boundary).toBe('OUTSIDE')

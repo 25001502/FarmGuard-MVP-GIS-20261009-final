@@ -1,6 +1,6 @@
 import type { FarmState } from '../types'
 
-const STORAGE_KEY = 'farmguard-mvp:v1'
+const STORAGE_KEY = 'farmguard-mvp:v2'
 
 export function loadFarmState(): FarmState | null {
   try {
