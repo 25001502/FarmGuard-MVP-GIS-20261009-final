@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createInitialState, DEMO_POINTS, MAP_SIZE } from './data'
 import { clearResolvedBreach, dedupeAlerts, processTelemetry, reclassifyForGeofence } from './lib/engine'
-import { classifyBoundary, isSelfIntersecting, polygonArea } from './lib/geometry'
+import { classifyBoundary, findNearBoundaryPoint, findOutsidePoint, findSafePoint, isSelfIntersecting, polygonArea } from './lib/geometry'
 import { loadFarmState, saveFarmState } from './lib/storage'
 import { liveTick, movementLabel, smsReply, smsText, soundLevel } from './lib/live'
 import { RealFarmMap } from './components/RealFarmMap'
@@ -56,18 +56,21 @@ function statusLabel(state: BoundaryState): string { return state === 'NEAR_BOUN
 function statusClass(state: BoundaryState): string { return state === 'NEAR_BOUNDARY' ? 'warning' : state === 'OUTSIDE' ? 'danger' : 'safe' }
 function alertIcon(type: AlertType): IconName { return type === 'TAMPER' ? 'shield' : type === 'PROXIMITY' ? 'sound' : 'alert' }
 
+type LiveApi = { running: boolean; toggle: () => void }
+
 export default function App() {
   const [state, setState] = useState<FarmState>(() => loadFarmState() ?? createInitialState())
   const [view, setView] = useState<View>(() => (window.location.hash.slice(1) as View) || 'map')
   const [menuOpen, setMenuOpen] = useState(false)
   const [toast, setToast] = useState<{ title: string; detail: string; tone?: 'warning' | 'danger' } | null>(null)
   const demoTimer = useRef<number | undefined>(undefined)
+  const guidanceTimers = useRef<number[]>([])
   const stateRef = useRef(state)
   const audioRef = useRef<AudioContext | null>(null)
   stateRef.current = state
 
   useEffect(() => { saveFarmState(state) }, [state])
-  useEffect(() => () => { if (demoTimer.current) window.clearInterval(demoTimer.current) }, [])
+  useEffect(() => () => { if (demoTimer.current) window.clearInterval(demoTimer.current); guidanceTimers.current.forEach((timer) => window.clearInterval(timer)) }, [])
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(null), 3600); return () => window.clearTimeout(timer) } }, [toast])
 
   useEffect(() => {
@@ -88,13 +91,14 @@ export default function App() {
     setState((current) => ({ ...current, sms: [...fresh.map((alert) => ({ id: `sms-${alert.id}`, alertId: alert.id, to: 'Farm Manager (demo)', text: smsText(alert, current.animals.find((item) => item.id === alert.animalId)), createdAt: alert.createdAt })), ...current.sms].slice(0, 30) }))
   }, [state.alerts, state.smsEnabled])
 
+  const update = (recipe: (current: FarmState) => FarmState) => setState((current) => recipe(current))
+
   const live: LiveApi = {
     running: state.liveMode,
     toggle: () => update((current) => ({ ...current, liveMode: !current.liveMode })),
   }
 
   const navigate = (next: View) => { setView(next); window.location.hash = next; setMenuOpen(false) }
-  const update = (recipe: (current: FarmState) => FarmState) => setState((current) => recipe(current))
   const announce = (title: string, detail: string, tone?: 'warning' | 'danger') => setToast({ title, detail, tone })
 
   const playTone = (level = 3) => {
@@ -152,11 +156,47 @@ export default function App() {
   const acknowledge = (id: string) => update((current) => ({ ...current, alerts: current.alerts.map((alert) => alert.id === id ? { ...alert, status: 'acknowledged', acknowledgedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : alert) }))
   const resolve = (id: string) => update((current) => ({ ...current, alerts: current.alerts.map((alert) => alert.id === id ? { ...alert, status: 'resolved', resolvedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : alert) }))
   const locate = (animalId: string) => { update((current) => ({ ...current, selectedAnimalId: animalId })); navigate('map') }
-  const simulateManual = (kind: 'near' | 'breach' | 'return' | 'tamper') => {
-    if (kind === 'near') { applyReading('C-007', DEMO_POINTS.approach); update((current) => ({ ...current, demoStage: 1, selectedAnimalId: 'C-007' })) }
-    if (kind === 'breach') { runStage(2) }
-    if (kind === 'return') { applyReading('C-007', DEMO_POINTS.return); applyReading('C-007', DEMO_POINTS.return); applyReading('C-007', DEMO_POINTS.return); update((current) => ({ ...current, demoStage: 0, alerts: clearResolvedBreach(current.alerts, 'C-007', current.security['C-007'], new Date().toISOString()) })) }
-    if (kind === 'tamper') { applyReading('C-003', { x: 441, y: 225 }, true); update((current) => ({ ...current, selectedAnimalId: 'C-003', demoStage: 3 })) }
+  const simulateManual = (kind: 'near' | 'breach' | 'return' | 'tamper', animalId = state.selectedAnimalId) => {
+    const animal = state.animals.find((item) => item.id === animalId)
+    if (!animal) return
+    const variant = state.animals.findIndex((item) => item.id === animalId)
+    const nearPoint = findNearBoundaryPoint(state.geofence.vertices, state.geofence.warningDistance, variant) ?? DEMO_POINTS.approach
+    const outsidePoint = findOutsidePoint(state.geofence.vertices, state.geofence.warningDistance, variant) ?? DEMO_POINTS.breach
+    const safePoint = findSafePoint(state.geofence.vertices, state.geofence.warningDistance, variant) ?? DEMO_POINTS.return
+    if (kind === 'near') { applyReading(animalId, nearPoint); update((current) => ({ ...current, demoStage: 1, selectedAnimalId: animalId })) }
+    if (kind === 'breach') { applyReading(animalId, outsidePoint, false, false); applyReading(animalId, outsidePoint, false, false); applyReading(animalId, outsidePoint, false, true); update((current) => ({ ...current, demoStage: 2, selectedAnimalId: animalId })) }
+    if (kind === 'return') { applyReading(animalId, safePoint); applyReading(animalId, safePoint); applyReading(animalId, safePoint); update((current) => ({ ...current, demoStage: 0, alerts: clearResolvedBreach(current.alerts, animalId, current.security[animalId], new Date().toISOString()) })) }
+    if (kind === 'tamper') { applyReading(animalId, animal.position, true); update((current) => ({ ...current, selectedAnimalId: animalId, demoStage: 3 })) }
+  }
+
+  const guideOutsideAnimals = () => {
+    const outsideAnimals = state.animals.filter((animal) => ['OUTSIDE', 'NEAR_BOUNDARY'].includes(state.security[animal.id]?.boundary))
+    if (!outsideAnimals.length) { announce('Herd already comfortably inside', 'No cattle currently need a guided return.'); return }
+    guidanceTimers.current.forEach((timer) => window.clearInterval(timer)); guidanceTimers.current = []
+    outsideAnimals.forEach((animal, index) => {
+      const target = findSafePoint(state.geofence.vertices, state.geofence.warningDistance, index)
+      if (!target) return
+      const start = { ...animal.position }
+      let step = 0
+      const timer = window.setInterval(() => {
+        step += 1
+        const progress = step / 9
+        const position = { x: start.x + (target.x - start.x) * progress, y: start.y + (target.y - start.y) * progress }
+        update((current) => {
+          const currentAnimal = current.animals.find((item) => item.id === animal.id)
+          if (!currentAnimal) return current
+          const boundary = classifyBoundary(position, current.geofence.vertices, current.geofence.warningDistance)
+          return {
+            ...current,
+            animals: current.animals.map((item) => item.id === animal.id ? { ...item, position, lastSeenAt: new Date().toISOString() } : item),
+            security: { ...current.security, [animal.id]: { ...current.security[animal.id], boundary, consecutiveOutside: 0, consecutiveInside: 0, lastProcessedAt: new Date().toISOString() } },
+          }
+        })
+        if (step >= 9) { window.clearInterval(timer); guidanceTimers.current = guidanceTimers.current.filter((activeTimer) => activeTimer !== timer) }
+      }, 250)
+      guidanceTimers.current.push(timer)
+    })
+    announce('Guidance route started', `${outsideAnimals.length} cattle ${outsideAnimals.length === 1 ? 'is' : 'are'} moving away from the boundary and into the designated grazing area.`, 'warning')
   }
 
   const activeAlerts = state.alerts.filter((alert) => alert.status !== 'resolved')
@@ -182,7 +222,7 @@ export default function App() {
 
   return <div className="app-shell">
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><Icon name="shield" size={22} /></div><div><strong>Farm<span>Guard</span></strong><small>Livestock security</small></div></div>
+      <div className="brand"><div className="brand-mark"><Icon name="shield" size={22} /></div><div><strong>Neck<span>Wear</span></strong><small>Livestock security</small></div></div>
       <div className="nav-label">WORKSPACE</div><nav className="nav-links" aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} className={`nav-link ${view === item.id ? 'active' : ''}`} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.label}</span>{item.id === 'alerts' && activeAlerts.length > 0 && <b>{activeAlerts.length}</b>}</button>)}</nav>
       <div className="sidebar-spacer" /><div className="sidebar-card"><span className="sidebar-card-icon"><Icon name="shield" /></span><strong>Your herd, protected.</strong><p>Early warnings for animals wandering outside safe grazing zones.</p><span className="ready"><i /> DEMO SYSTEM READY</span></div>
       <div className="account"><span className="avatar">FM</span><span><strong>Farm Manager</strong><small>Makonde Farm · Limpopo</small></span></div>
@@ -200,11 +240,6 @@ function CardHeader({ title, subtitle, action }: { title: string; subtitle?: str
 
 function Overview({ live, state, counts, activeAlerts, selected, onNavigate, onLocate, onReset, onDemo, onManual, onSelect }: { live: LiveApi; state: FarmState; counts: { inside: number; near: number; outside: number }; activeAlerts: SecurityAlert[]; selected: Animal; onNavigate: (view: View) => void; onLocate: (id: string) => void; onReset: () => void; onDemo: () => void; onManual: (kind: 'near' | 'breach' | 'return' | 'tamper') => void; onSelect: (id: string) => void }) {
   return <><PageHeading eyebrow="Livestock security dashboard" title="Good day, Farm Manager" description="Monitor your herd, protect grazing boundaries, and respond to security events." actions={<><Button onClick={onReset}><Icon name="refresh" size={15} /> Reset demo</Button><Button primary onClick={onDemo}><Icon name={state.demoRunning ? 'pause' : 'play'} size={15} /> {state.demoRunning ? 'Pause guided demo' : 'Run guided demo'}</Button></>} /><div className="simulation-banner"><span><i /><strong>SIMULATION MODE</strong> · No live collars connected</span><small>All readings, map positions and alerts are locally simulated for demonstration.</small></div><div className="metric-grid"><Metric label="Registered cattle" value={state.animals.length} helper="Monitored in demo" icon="cow" /><Metric label="Inside safe zone" value={counts.inside} helper="Within configured fence" icon="shield" /><Metric label="Near boundary" value={counts.near} helper="Attention recommended" icon="location" tone="warning" /><Metric label="Outside safe zone" value={counts.outside} helper="Inspection required" icon="alert" tone="danger" /></div><div className="content-grid"><div><section className="card map-card"><CardHeader title="Virtual fence & livestock locations" subtitle="Select a marker to inspect that collar's simulated status" action={<span className="live-pill"><i /> DEMO MAP</span>} /><FarmMap state={state} onSelect={onSelect} /><div className="scenario-bar"><LiveBar live={live} /><span>Simulated collar data. The dashboard only watches; it never controls the animals.</span></div></section><div className="info-note"><Icon name="info" size={17} /><span><strong>Honest demo boundary.</strong> The map uses illustrative coordinates, not a surveyed farm map. A boundary crossing is an inspection signal — not proof of theft.</span></div></div><aside className="side-stack"><AlertPanel alerts={activeAlerts} onLocate={onLocate} onNavigate={onNavigate} /><HerdWatchlist state={state} onLocate={onLocate} /><div className="insight-card"><Icon name="shield" size={20} /><div><strong>Built around early detection</strong><p>Spot unusual location or collar signals early and decide what to inspect next.</p></div></div></aside></div><GuidedCard state={state} onDemo={onDemo} /></>
-}
-
-function LegacyFarmMap({ state, onSelect, editable = false, draftVertices, onVertexDrag }: { state: FarmState; onSelect: (id: string) => void; editable?: boolean; draftVertices?: Point[]; onVertexDrag?: (index: number, event: ReactPointerEvent<SVGCircleElement>) => void }) {
-  const fence = draftVertices ?? state.geofence.vertices
-  return <div className="map-wrap"><svg className="farm-map" viewBox={`0 0 ${MAP_SIZE.width} ${MAP_SIZE.height}`} role="img" aria-label="Illustrative map of Makonde Farm with virtual fence and simulated cattle"><defs><pattern id="grass" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M4 15l5-3M17 24l4-4" stroke="#8aa17b" strokeWidth="1" opacity=".28" /></pattern><filter id="shadow"><feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#315b3c" floodOpacity=".18" /></filter></defs><rect width="950" height="580" fill="#dfe8c8" /><rect width="950" height="580" fill="url(#grass)" /><path d="M0 450C190 390 290 480 490 410S800 360 950 420" fill="none" stroke="#a3b88f" strokeWidth="28" opacity=".28" /><path d="M0 520 950 170M110 0 250 580" stroke="#91a880" strokeWidth="2" strokeDasharray="9 13" opacity=".42" /><path d="M90 110l22-16 23 16v24H90Z" fill="#e5d8b8" stroke="#899d7b" strokeWidth="2" /><path d="m85 110 28-20 28 20" fill="#879979" /><text x="150" y="119" className="map-label">FARMHOUSE</text><text x="275" y="158" className="map-label">NORTH PASTURE</text><text x="493" y="335" className="map-label">CENTRAL PASTURE</text><text x="68" y="540" className="map-label">WEST MEADOW</text>{state.fenceVisible && <><polygon points={fence.map((point) => `${point.x},${point.y}`).join(' ')} fill="#2c8b5a" fillOpacity=".16" stroke="#23774b" strokeWidth="4" strokeDasharray="10 7" filter="url(#shadow)" /><polyline points={fence.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#d2e4b0" strokeWidth="1.5" /></>}{state.animals.map((animal) => { const security = state.security[animal.id]; const selected = animal.id === state.selectedAnimalId; const color = security.boundary === 'OUTSIDE' || security.tamperActive ? '#bf554a' : security.boundary === 'NEAR_BOUNDARY' ? '#b87720' : '#2c8b5a'; return <g key={animal.id} className={`animal-marker ${selected ? 'selected' : ''}`} transform={`translate(${animal.position.x} ${animal.position.y})`} onClick={() => onSelect(animal.id)} tabIndex={0} role="button" aria-label={`${animal.id} ${animal.name}, ${statusLabel(security.boundary)}`}><circle r={selected ? 30 : 21} fill={color} opacity=".15" /><circle r={selected ? 17 : 14} fill="#fff" stroke={color} strokeWidth={selected ? 3 : 2.2} /><path d="M-7-1q7-7 14 0v7q-7 6-14 0Z M-7-2-10-6v7l3 2M7-2l3-4v7L7 3" fill={color} transform="scale(.72)" /><circle cx="-3" cy="1" r="1" fill="#fff" /><circle cx="3" cy="1" r="1" fill="#fff" />{selected && <><rect x="-33" y="-50" width="66" height="23" rx="8" fill="#fff" stroke={color} /><text x="0" y="-35" textAnchor="middle" className="marker-label">{animal.id}</text></>}</g> })}{editable && fence.map((point, index) => <circle key={`handle-${index}`} className="fence-handle" cx={point.x} cy={point.y} r="9" onPointerDown={(event) => onVertexDrag?.(index, event)} aria-label={`Move boundary point ${index + 1}`} />)}</svg><div className="map-top-label"><Icon name="map" size={15} /> Makonde Farm · illustration</div><div className="map-legend"><span><i className="legend-fence" /> Geofence</span><span><i className="legend-safe" /> Safe</span><span><i className="legend-warning" /> Near fence</span><span><i className="legend-danger" /> Alert</span></div><div className="map-caption">Illustrative coordinates · not real GPS</div></div>
 }
 
 function FarmMap({ state, onSelect, editable = false, draftVertices, onVertexDrag }: { state: FarmState; onSelect: (id: string) => void; editable?: boolean; draftVertices?: Point[]; onVertexDrag?: (index: number, point: Point) => void }) {
@@ -244,8 +279,6 @@ function AlertDetail({ alert, onAcknowledge, onResolve, onLocate }: { alert: Sec
 
 function SettingsView({ onToggleSms, state, onToggleSound, onToggleFence, onReset, onDemo }: { onToggleSms: () => void; state: FarmState; onToggleSound: () => void; onToggleFence: () => void; onReset: () => void; onDemo: () => void }) { return <><PageHeading eyebrow="Demo configuration" title="System configuration" description="Manage local prototype settings and understand what is simulated." actions={<Button onClick={onReset}><Icon name="refresh" size={15} /> Reset dataset</Button>} /><div className="split-grid settings-grid"><div><section className="card setting-card"><CardHeader title="Farm boundary" subtitle="The safe zone is an illustrative local polygon." /><SettingRow label="Show safe-zone boundary" description="Display the green geofence on the map." value={state.fenceVisible} onClick={onToggleFence} /><SettingRow label="Browser warning tone" description="Rising pitch and volume as an animal nears the fence (simulated collar buzzer)." value={state.soundEnabled} onClick={onToggleSound} /><SettingRow label="SMS alerts" description="Sends short texts to the farmer. Needs no data plan and uses no battery on the collar." value={state.smsEnabled} onClick={onToggleSms} /></section><section className="card setting-card"><CardHeader title="Four-stage concept architecture" subtitle="The field concept has no cloud/server stage." /><div className="architecture"><div><span>01</span><Icon name="cow" /><strong>Smart collar</strong><small>GPS, buzzer, tamper input</small></div><div><span>02</span><Icon name="signal" /><strong>Wireless link</strong><small>LoRa to a farm gateway, then SMS or satellite</small></div><div><span>03</span><Icon name="map" /><strong>Dashboard</strong><small>Local map and alerts</small></div><div><span>04</span><Icon name="cow" /><strong>Farmer</strong><small>Inspects and responds</small></div></div></section></div><aside className="side-stack"><section className="card detail-card"><div className="eyebrow">Demo readiness</div><h2>Ready for judges</h2><div className="detail-list"><div><span>Offline dashboard</span><strong>Available</strong></div><div><span>Geofence engine</span><strong>Local logic</strong></div><div><span>Collar buzzer</span><strong>Browser simulation</strong></div><div><span>Tamper sensor</span><strong>Simulated</strong></div><div><span>Hardware adapter</span><strong>Not connected</strong></div><div><span>Cloud/server</span><strong>Not required</strong></div></div><Button primary className="full-width" onClick={onDemo}><Icon name="play" size={15} /> Start guided demo</Button></section><div className="insight-card"><Icon name="info" size={20} /><div><strong>Local persistence boundary</strong><p>localStorage keeps this browser's demo state. It is not encrypted, synchronized or a production audit service.</p></div></div></aside></div></> }
 function SettingRow({ label, description, value, onClick }: { label: string; description: string; value: boolean; onClick: () => void }) { return <div className="setting-row"><div><strong>{label}</strong><small>{description}</small></div><button className={`toggle ${value ? 'on' : ''}`} role="switch" aria-checked={value} onClick={onClick}><span /></button></div> }
-
-type LiveApi = { running: boolean; toggle: () => void }
 
 function LiveBar({ live }: { live: LiveApi }) {
   let toggleIcon: IconName = 'play'

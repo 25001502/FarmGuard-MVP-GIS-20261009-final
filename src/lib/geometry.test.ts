@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyBoundary, isSelfIntersecting, minDistanceToEdges, pointInPolygon, polygonArea } from './geometry'
+import { classifyBoundary, findNearBoundaryPoint, findOutsidePoint, findSafePoint, isSelfIntersecting, minDistanceToEdges, pointInPolygon, polygonArea } from './geometry'
 
 const square = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }]
 
@@ -21,5 +21,18 @@ describe('geofence geometry', () => {
     expect(polygonArea(square)).toBe(10000)
     expect(isSelfIntersecting(square)).toBe(false)
     expect(isSelfIntersecting([{ x: 0, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 100, y: 0 }])).toBe(true)
+  })
+
+  it('finds a point safely inside a grazing area', () => {
+    const target = findSafePoint(square, 10, 2)
+    expect(target).not.toBeNull()
+    expect(classifyBoundary(target!, square, 10)).toBe('INSIDE')
+  })
+
+  it('finds positions for proximity and breach simulations', () => {
+    const near = findNearBoundaryPoint(square, 10)
+    const outside = findOutsidePoint(square, 10)
+    expect(classifyBoundary(near!, square, 10)).toBe('NEAR_BOUNDARY')
+    expect(classifyBoundary(outside!, square, 10)).toBe('OUTSIDE')
   })
 })
